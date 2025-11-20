@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+    <head>
+        <title>VAPI - Chat con Auto-detección</title>
+        <meta charset="UTF-8">
+        <style>
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                min-height:100vh;
+                display:flex;
+                justify-content:center;
+                align-items:center;
+                padding:20px;
+            }
+            .container {
+                background:rgb(255, 220, 180);
+                border-radius:20px;
+                box-shadow:0 20px 60px rgba(0,0,0,0.3);
+                max-width:800px;
+                width:100%;
+                padding:40px;
+            }
+            h1 {
+                color:#667eea;
+                text-align:center;
+                margin-bottom:10px;
+                font-size:2.5em;
+            }
+            .subtitle {
+                text-align:center;
+                color:#666;
+                margin-bottom:30px;
+            }
+            .chat-container {
+                border:2px solid #e0e0e0;
+                border-radius:15px;
+                height:400px;
+                overflow-y:auto;
+                padding:20px;
+                margin-bottom:20px;
+                background:#d086f7;
+            }
+            .message {
+                margin-bottom:15px;
+                padding:12px 18px;
+                border-radius:18px;
+                max-width:80%;
+                animation:slideIn .3s ease;
+            }
+            .user-message {
+                background:#667eea;
+                color:rgb(255, 255, 255);
+                margin-left:auto;
+                text-align:right;
+            }
+            .assistant-message {
+                background:#e9ecef;
+                color:#333;
+            }
+            .system-message {
+                background:#fff3cd;
+                color:#856404;
+                text-align:center;
+                margin:10px auto;
+                font-size:.9em;
+            }
+            .controls {
+                display:flex;
+                gap:15px;
+                justify-content:center;
+                flex-wrap:wrap;
+            }
+            button {
+                padding:15px 30px;
+                border:none;
+                border-radius:25px;
+                font-size:16px;
+                font-weight:600;
+                cursor:pointer;
+                transition:all .3s;
+            }
+            #recordBtn {
+                background:#28a745;
+                color:rgb(254, 252, 251);
+            }
+            #recordBtn.recording {
+                background:#dc3545;
+                animation:pulse 1.5s infinite;
+            }
+            #recordBtn:disabled {
+                background:#ccc;
+                cursor:not-allowed;
+            }
+            #clearBtn {
+                background:#6c757d;
+                color:white;
+            }
+            .status {
+                text-align:center;
+                padding:15px;
+                border-radius:10px;
+                margin-top:20px;
+                font-weight:500;
+            }
+            .status.connected { background:#d4edda; color:#155724; box-shadow: 0 0 3px 5px rgba(0, 0, 0, 0.125); }
+            .status.disconnected { background:#f8d7da; color:#721c24; box-shadow: 0 0 3px 5px rgba(0, 0, 0, 0.125); }
+            .status.processing { background:#d1ecf1; color:#0c5460; box-shadow: 0 0 3px 5px rgba(0, 0, 0, 0.125); }
+            .status.listening { background:#cfe2ff; color:#084298; box-shadow: 0 0 3px 5px rgba(0, 0, 0, 0.125); }
+            
+            .settings {
+                background:#f8f9fa;
+                border-radius:10px;
+                padding:15px;
+                margin-bottom:20px;
+            }
+            .settings label {
+                display:block;
+                margin-bottom:8px;
+                color:#666;
+                font-size:14px;
+            }
+            .settings input[type="range"] {
+                width:100%;
+            }
+            .settings-row {
+                display:flex;
+                gap:20px;
+                margin-bottom:10px;
+            }
+            .settings-item {
+                flex:1;
+            }
+            
+            @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+            }
+            @keyframes slideIn {
+                from { opacity:0; transform:translateY(10px); }
+                to { opacity:1; transform:translateY(0); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎙️ VAPI Auto-detección</h1>
+            <p class="subtitle">Habla libremente - se detecta automáticamente cuando terminas</p>
+            
+            <div class="settings">
+                <h3 style="margin-bottom:15px; color:#667eea;">⚙️ Configuración de Detección</h3>
+                <div class="settings-row">
+                    <div class="settings-item">
+                        <label for="thresholdSlider">
+                            Umbral de Volumen: <span id="thresholdValue">-40</span> dB
+                        </label>
+                        <input type="range" id="thresholdSlider" min="-60" max="-20" value="-40" step="1">
+                    </div>
+                    <div class="settings-item">
+                        <label for="silenceSlider">
+                            Tiempo de Silencio: <span id="silenceValue">1.5</span> segundos
+                        </label>
+                        <input type="range" id="silenceSlider" min="0.5" max="3" value="1.5" step="0.1">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-container" id="chatContainer">
+                <div class="message system-message">
+                    👋 ¡Bienvenido! Presiona "Iniciar" y habla libremente. La grabación se detendrá automáticamente cuando detecte silencio.
+                </div>
+            </div>
+            
+            <div class="controls">
+                <button id="recordBtn" onclick="toggleRecording()" disabled>
+                    🎤 Iniciar
+                </button>
+                <button id="clearBtn" onclick="clearChat()">
+                    🗑️ Limpiar Chat
+                </button>
+            </div>
+            
+            <div id="status" class="status disconnected">
+                ⚠️ Conectando al servidor...
+            </div>
+        </div>
+
+        <script>
+            let ws = null;
+            let mediaRecorder = null;
+            let audioChunks = [];
+            let conversationHistory = [];
+            let isRecording = false;
+            let audioContext = null;
+            let analyser = null;
+            let silenceTimer = null;
+            let stream = null;
+            let recordingStartTime = 0;
+            
+            // Configuración VAD (Voice Activity Detection)
+            let vadConfig = {
+                silenceThreshold: -40,  // dB
+                silenceDuration: 1500   // ms
+            };
+            
+            // Actualizar configuración desde sliders
+            document.getElementById('thresholdSlider').addEventListener('input', (e) => {
+                vadConfig.silenceThreshold = Number.parseInt(e.target.value);
+                document.getElementById('thresholdValue').textContent = e.target.value;
+            });
+            
+            document.getElementById('silenceSlider').addEventListener('input', (e) => {
+                vadConfig.silenceDuration = Number.parseFloat(e.target.value) * 1000;
+                document.getElementById('silenceValue').textContent = e.target.value;
+            });
+            
+            // Conectar al WebSocket
+            function connectWebSocket() {
+                const protocol = globalThis.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(`${protocol}//${globalThis.location.host}/ws/voice`);
+                
+                ws.onopen = () => {
+                    updateStatus('connected', '✅ Conectado - Listo para hablar');
+                    document.getElementById('recordBtn').disabled = false;
+                };
+                
+                ws.onclose = () => {
+                    updateStatus('disconnected', '⚠️ Desconectado - Intentando reconectar...');
+                    document.getElementById('recordBtn').disabled = true;
+                    setTimeout(connectWebSocket, 3000);
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    updateStatus('disconnected', '❌ Error de conexión');
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    handleServerMessage(data);
+                };
+            }
+            
+            // Manejar mensajes del servidor
+            function handleServerMessage(data) {
+                if (data.type === 'transcription') {
+                    addMessage('user', data.text);
+                } else if (data.type === 'response') {
+                    addMessage('assistant', data.text);
+                    updateStatus('connected', '✅ Listo para hablar');
+                } else if (data.type === 'audio') {
+                    try {
+                        const src = `data:${data.format};base64,${data.data}`;
+                        const audio = new Audio(src);
+                        audio.play().catch(err => console.warn('Error reproduciendo:', err));
+                    } catch (e) {
+                        console.error('Error con audio:', e);
+                    }
+                } else if (data.type === 'status') {
+                    updateStatus('processing', data.message);
+                } else if (data.type === 'error') {
+                    addMessage('system', '❌ Error: ' + data.message);
+                    updateStatus('connected', '✅ Listo para hablar');
+                }
+            }
+            
+            // Toggle grabación
+            async function toggleRecording() {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    await startRecording();
+                }
+            }
+            
+            // Iniciar grabación con VAD
+            async function startRecording() {
+                try {
+                    recordingStartTime = Date.now();
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        } 
+                    });
+                    
+                    // Configurar analizador de audio para VAD
+                    audioContext = new (globalThis.AudioContext || globalThis.webkitAudioContext)();
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    analyser.smoothingTimeConstant = 0.8;
+                    
+                    const source = audioContext.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                    
+                    // Iniciar MediaRecorder
+                    mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm'
+                    });
+                    
+                    audioChunks = [];
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    };
+                    
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        await sendAudio(audioBlob);
+                        cleanup();
+                    };
+                    
+                    mediaRecorder.start();
+                    isRecording = true;
+                    
+                    // UI Updates
+                    const btn = document.getElementById('recordBtn');
+                    btn.textContent = '🔴 Escuchando...';
+                    btn.classList.add('recording');
+                    updateStatus('listening', '🎤 Hablando... (auto-stop cuando haya silencio)');
+                    
+                    // Iniciar monitoreo de silencio
+                    monitorSilence();
+                    
+                } catch (error) {
+                    console.error('Error accediendo al micrófono:', error);
+                    addMessage('system', '❌ No se pudo acceder al micrófono');
+                    cleanup();
+                }
+            }
+            
+            // Monitorear silencio (VAD)
+            function monitorSilence() {
+                if (!isRecording || !analyser) return;
+
+                // Periodo de gracia: Si llevamos menos de 1 segundo (1000ms) grabando, ignorar silencio
+                if (Date.now() - recordingStartTime < 1000) {
+                    requestAnimationFrame(monitorSilence);
+                    return;
+                }
+                
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+                
+                // Calcular volumen RMS
+                const sum = dataArray.reduce((a, b) => a + b, 0);
+                const average = sum / bufferLength;
+                const volume = 20 * Math.log10(average / 255);  // Convertir a dB
+                
+                // Detectar si hay voz o silencio
+                if (volume > vadConfig.silenceThreshold) {
+                    // Hay voz - resetear timer de silencio
+                    if (silenceTimer) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = null;
+                    }
+                    updateStatus('listening', `🎤 Hablando... (${Math.round(volume)} dB)`);
+                } else {
+                    // Silencio detectado
+                    if (!silenceTimer) {
+                        // Iniciar timer de silencio
+                        silenceTimer = setTimeout(() => {
+                            console.log('Silencio detectado - deteniendo grabación');
+                            stopRecording();
+                        }, vadConfig.silenceDuration);
+                        
+                        updateStatus('listening', '🤫 Silencio detectado... esperando');
+                    }
+                }
+                
+                // Continuar monitoreando
+                if (isRecording) {
+                    requestAnimationFrame(monitorSilence);
+                }
+            }
+            
+            // Detener grabación
+            function stopRecording() {
+                if (!isRecording) return;
+                
+                isRecording = false;
+                
+                if (silenceTimer) {
+                    clearTimeout(silenceTimer);
+                    silenceTimer = null;
+                }
+                
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                }
+                
+                const btn = document.getElementById('recordBtn');
+                btn.textContent = '🎤 Iniciar';
+                btn.classList.remove('recording');
+                updateStatus('processing', '⏳ Procesando tu mensaje...');
+            }
+            
+            // Limpiar recursos
+            function cleanup() {
+                if (stream) {
+                    for (const track of stream.getTracks()) {
+                        track.stop();
+                    }
+                    stream = null;
+                }
+                
+                if (audioContext && audioContext.state !== 'closed') {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                
+                analyser = null;
+                isRecording = false;
+            }
+            
+            // Enviar audio al servidor
+            async function sendAudio(audioBlob) {
+                try {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const base64Audio = reader.result.split(',')[1];
+                        ws.send(JSON.stringify({
+                            type: 'audio',
+                            data: base64Audio,
+                            history: conversationHistory
+                        }));
+                    };
+                    reader.readAsDataURL(audioBlob);
+                } catch (error) {
+                    console.error('Error enviando audio:', error);
+                    addMessage('system', '❌ Error al enviar audio');
+                    updateStatus('connected', '✅ Listo para hablar');
+                }
+            }
+            
+            // Agregar mensaje al chat
+            function addMessage(role, text) {
+                const chatContainer = document.getElementById('chatContainer');
+                const messageDiv = document.createElement('div');
+                
+                if (role === 'user') {
+                    messageDiv.className = 'message user-message';
+                    conversationHistory.push({role: 'user', content: text});
+                } else if (role === 'assistant') {
+                    messageDiv.className = 'message assistant-message';
+                    conversationHistory.push({role: 'assistant', content: text});
+                } else {
+                    messageDiv.className = 'message system-message';
+                }
+                
+                messageDiv.textContent = text;
+                chatContainer.appendChild(messageDiv);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            // Actualizar estado
+            function updateStatus(type, message) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.className = `status ${type}`;
+                statusDiv.textContent = message;
+            }
+            
+            // Limpiar chat
+            function clearChat() {
+                document.getElementById('chatContainer').innerHTML = `
+                    <div class="message system-message">
+                        🗑️ Chat limpiado - Conversación reiniciada
+                    </div>
+                `;
+                conversationHistory = [];
+            }
+            
+            // Conectar al cargar
+            connectWebSocket();
+            
+            // Limpiar al cerrar
+            window.addEventListener('beforeunload', cleanup);
+        </script>
+    </body>
+</html>
+    
