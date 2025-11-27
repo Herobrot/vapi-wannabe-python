@@ -11,3 +11,13 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = 500
     stream: Optional[bool] = False
+
+# Nuevo modelo para ExaBot
+class ExamState(BaseModel):
+    session_id: str
+    start_time: float
+    current_question: int = 1
+    questions_answered: int = 0
+    elapsed_time: float = 0.0
+    remaining_time: float = 0.0
+    is_active: bool = False
